@@ -80,7 +80,9 @@ export const createAccount = createServerFn({ method: "POST" })
 
 export const updateAccount = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { id: string; username?: string; password?: string }) => d)
+  .inputValidator(
+    (d: { id: string; username?: string | undefined; password?: string | undefined }) => d,
+  )
   .handler(async ({ data, context }) => {
     await assertAdmin(context as any);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
