@@ -1,5 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { QRCodeSVG } from "qrcode.react";
 import {
   QrCode,
   Boxes,
@@ -12,6 +13,11 @@ import {
   Plus,
   Shield,
   LogOut,
+  Tag,
+  Upload,
+  Printer,
+  ClipboardCheck,
+  History,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -48,12 +54,24 @@ type Asset = {
   updated_at: string;
 };
 
-const STATUSES: { id: Status; label: string; cls: string; dot: string }[] = [
-  { id: "active", label: "Active", cls: "text-st-active bg-st-active/12", dot: "bg-st-active" },
-  { id: "repair", label: "In repair", cls: "text-st-repair bg-st-repair/12", dot: "bg-st-repair" },
-  { id: "storage", label: "Storage", cls: "text-st-storage bg-st-storage/12", dot: "bg-st-storage" },
-  { id: "retired", label: "Retired", cls: "text-st-retired bg-st-retired/12", dot: "bg-st-retired" },
+type Checkout = {
+  id: string;
+  asset_id: string;
+  user_id: string;
+  checked_out_to: string;
+  checked_out_at: string;
+  returned_at: string | null;
+  notes: string;
+};
+
+const STATUSES: { id: Status; label: string; cls: string; dot: string; bar: string }[] = [
+  { id: "active", label: "Active", cls: "text-st-active bg-st-active/12", dot: "bg-st-active", bar: "bg-st-active" },
+  { id: "repair", label: "In repair", cls: "text-st-repair bg-st-repair/12", dot: "bg-st-repair", bar: "bg-st-repair" },
+  { id: "storage", label: "Storage", cls: "text-st-storage bg-st-storage/12", dot: "bg-st-storage", bar: "bg-st-storage" },
+  { id: "retired", label: "Retired", cls: "text-st-retired bg-st-retired/12", dot: "bg-st-retired", bar: "bg-st-retired" },
 ];
+
+const VALID_STATUS = new Set(STATUSES.map((s) => s.id));
 
 const statusMeta = (s: Status) => STATUSES.find((x) => x.id === s)!;
 
@@ -71,7 +89,7 @@ function StatusBadge({ status }: { status: Status }) {
 
 function AssetLedger() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState<"scan" | "inventory" | "export">("scan");
+  const [tab, setTab] = useState<"scan" | "inventory" | "labels" | "reports">("scan");
   const [assets, setAssets] = useState<Asset[]>([]);
   const [editing, setEditing] = useState<Asset | null>(null);
   const [toast, setToast] = useState("");
@@ -194,15 +212,19 @@ function AssetLedger() {
       <main className="flex-1 overflow-y-auto px-[18px] pb-[90px] pt-[18px]">
         {tab === "scan" && <ScanTab onTag={openTag} />}
         {tab === "inventory" && <InventoryTab assets={assets} onOpen={(a) => setEditing(a)} />}
-        {tab === "export" && <ExportTab assets={assets} onToast={showToast} />}
+        {tab === "labels" && <LabelsTab assets={assets} onToast={showToast} />}
+        {tab === "reports" && (
+          <ReportsTab assets={assets} isAdmin={isAdmin} onToast={showToast} onReload={reload} />
+        )}
       </main>
 
-      <nav className="absolute inset-x-0 bottom-0 flex flex-shrink-0 border-t border-border bg-surface px-2.5 pb-[calc(8px+env(safe-area-inset-bottom))] pt-2">
+      <nav className="absolute inset-x-0 bottom-0 flex flex-shrink-0 border-t border-border bg-surface px-2 pb-[calc(8px+env(safe-area-inset-bottom))] pt-2">
         {(
           [
             { id: "scan", label: "Scan", Icon: QrCode },
             { id: "inventory", label: "Inventory", Icon: Boxes },
-            { id: "export", label: "Export", Icon: Download },
+            { id: "labels", label: "Labels", Icon: Tag },
+            { id: "reports", label: "Reports", Icon: Download },
           ] as const
         ).map(({ id, label, Icon }) => (
           <button
@@ -225,6 +247,8 @@ function AssetLedger() {
           onClose={() => setEditing(null)}
           onSave={saveAsset}
           onDelete={removeAsset}
+          onReload={reload}
+          onToast={showToast}
         />
       )}
 
@@ -450,11 +474,139 @@ function InventoryTab({ assets, onOpen }: { assets: Asset[]; onOpen: (a: Asset) 
   );
 }
 
-function ExportTab({ assets, onToast }: { assets: Asset[]; onToast: (m: string) => void }) {
+function LabelsTab({ assets, onToast }: { assets: Asset[]; onToast: (m: string) => void }) {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  const toggle = (tag: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
+      return next;
+    });
+
+  const allSelected = assets.length > 0 && selected.size === assets.length;
+  const chosen = assets.filter((a) => selected.has(a.tag));
+
+  if (assets.length === 0)
+    return (
+      <div className="px-5 py-12 text-center text-muted-foreground">
+        <Tag className="mx-auto mb-3.5 h-9 w-9 opacity-60" />
+        <p className="text-[13.5px]">No assets yet. Add some before printing labels.</p>
+      </div>
+    );
+
+  return (
+    <div>
+      <div className="mb-3.5 flex items-center justify-between gap-2">
+        <button
+          onClick={() => setSelected(allSelected ? new Set() : new Set(assets.map((a) => a.tag)))}
+          className="rounded-[10px] border border-border bg-surface px-3 py-2 text-[13px] text-muted-foreground"
+        >
+          {allSelected ? "Clear all" : "Select all"}
+        </button>
+        <span className="text-[13px] text-muted-foreground">{chosen.length} selected</span>
+      </div>
+
+      <div className="mb-5 max-h-[260px] overflow-y-auto rounded-[13px] border border-border bg-surface p-2">
+        {assets.map((a) => (
+          <label
+            key={a.tag}
+            className="flex cursor-pointer items-center gap-3 rounded-[9px] px-2.5 py-2 hover:bg-background"
+          >
+            <input
+              type="checkbox"
+              checked={selected.has(a.tag)}
+              onChange={() => toggle(a.tag)}
+              className="h-4 w-4 accent-[color:var(--accent)]"
+            />
+            <span className="font-mono text-[13px] text-muted-foreground">{a.tag}</span>
+            <span className="flex-1 truncate text-[14px]">{a.name || "Unnamed asset"}</span>
+          </label>
+        ))}
+      </div>
+
+      <button
+        onClick={() => {
+          if (chosen.length === 0) return onToast("Select at least one asset");
+          window.print();
+        }}
+        className="flex w-full items-center justify-center gap-2 rounded-[11px] border border-accent bg-accent px-4 py-3 text-[14.5px] font-semibold text-accent-foreground"
+      >
+        <Printer className="h-4 w-4" /> Print {chosen.length} label{chosen.length === 1 ? "" : "s"}
+      </button>
+
+      {/* Print area: shown only when printing */}
+      <div className="print-area">
+        {chosen.map((a) => (
+          <div key={a.tag} className="label-card">
+            <QRCodeSVG value={a.tag} size={120} level="M" />
+            <div className="label-tag">{a.tag}</div>
+            <div className="label-name">{a.name || "Unnamed asset"}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Bars({ items }: { items: { label: string; n: number; bar: string }[] }) {
+  const max = Math.max(1, ...items.map((i) => i.n));
+  if (items.length === 0)
+    return <p className="text-[13px] text-muted-foreground">No data yet.</p>;
+  return (
+    <div className="space-y-2.5">
+      {items.map((i) => (
+        <div key={i.label}>
+          <div className="mb-1 flex justify-between text-[13px]">
+            <span className="truncate text-muted-foreground">{i.label || "—"}</span>
+            <span className="font-mono">{i.n}</span>
+          </div>
+          <div className="bar-track">
+            <div className={`bar-fill ${i.bar}`} style={{ width: `${(i.n / max) * 100}%` }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ReportsTab({
+  assets,
+  isAdmin,
+  onToast,
+  onReload,
+}: {
+  assets: Asset[];
+  isAdmin: boolean;
+  onToast: (m: string) => void;
+  onReload: () => Promise<void>;
+}) {
   const counts = useMemo(
     () => STATUSES.map((s) => ({ ...s, n: assets.filter((a) => a.status === s.id).length })),
     [assets],
   );
+
+  const byStatus = useMemo(
+    () => STATUSES.map((s) => ({ label: s.label, n: assets.filter((a) => a.status === s.id).length, bar: s.bar })),
+    [assets],
+  );
+  const byLocation = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const a of assets) m.set(a.location || "Unset", (m.get(a.location || "Unset") ?? 0) + 1);
+    return [...m.entries()]
+      .map(([label, n]) => ({ label, n, bar: "bg-accent" }))
+      .sort((a, b) => b.n - a.n)
+      .slice(0, 8);
+  }, [assets]);
+  const byOwner = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const a of assets) m.set(a.owner || "Unassigned", (m.get(a.owner || "Unassigned") ?? 0) + 1);
+    return [...m.entries()]
+      .map(([label, n]) => ({ label, n, bar: "bg-accent" }))
+      .sort((a, b) => b.n - a.n)
+      .slice(0, 8);
+  }, [assets]);
 
   const exportFile = async (type: "xlsx" | "csv") => {
     if (assets.length === 0) return onToast("Nothing to export yet");
@@ -476,10 +628,60 @@ function ExportTab({ assets, onToast }: { assets: Asset[]; onToast: (m: string) 
     onToast("Export downloaded");
   };
 
+  const downloadTemplate = async () => {
+    const XLSX = await import("xlsx");
+    const ws = XLSX.utils.json_to_sheet([
+      { Tag: "AST-00001", Name: "Dell Latitude 5540", Status: "active", Location: "Floor 3 — Lab B", Owner: "IT Team", Notes: "New" },
+    ]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Template");
+    XLSX.writeFile(wb, "asset-import-template.xlsx");
+  };
+
+  const [importing, setImporting] = useState(false);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+
+  const handleImport = async (file: File) => {
+    setImporting(true);
+    try {
+      const XLSX = await import("xlsx");
+      const data = await file.arrayBuffer();
+      const wb = XLSX.read(data);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws);
+      const { data: u } = await supabase.auth.getUser();
+      if (!u.user) throw new Error("Not signed in");
+      const mapped = rows
+        .map((r) => {
+          const get = (k: string) => String((r as Record<string, unknown>)[k] ?? "").trim();
+          let status = get("Status").toLowerCase();
+          if (!VALID_STATUS.has(status as Status)) status = "active";
+          return {
+            user_id: u.user!.id,
+            tag: get("Tag") || get("tag"),
+            name: get("Name") || get("name"),
+            status,
+            location: get("Location") || get("location"),
+            owner: get("Owner") || get("owner"),
+            notes: get("Notes") || get("notes"),
+          };
+        })
+        .filter((r) => r.tag);
+      if (mapped.length === 0) throw new Error("No rows with a Tag column found");
+      const { error } = await supabase.from("assets").upsert(mapped, { onConflict: "user_id,tag" });
+      if (error) throw new Error(error.message);
+      await onReload();
+      onToast(`Imported ${mapped.length} asset${mapped.length === 1 ? "" : "s"}`);
+    } catch (e) {
+      onToast(e instanceof Error ? e.message : "Import failed");
+    }
+    setImporting(false);
+  };
+
   return (
     <div>
       <h2 className="mb-2.5 text-[13px] font-medium text-muted-foreground">Overview</h2>
-      <div className="mb-[22px] flex flex-wrap gap-2.5">
+      <div className="mb-6 flex flex-wrap gap-2.5">
         <div className="min-w-[100px] flex-1 rounded-[13px] border border-border bg-surface p-3.5">
           <div className="font-mono text-2xl font-semibold">{assets.length}</div>
           <div className="mt-0.5 text-xs text-muted-foreground">Total</div>
@@ -495,6 +697,21 @@ function ExportTab({ assets, onToast }: { assets: Asset[]; onToast: (m: string) 
         ))}
       </div>
 
+      <h2 className="mb-2.5 text-[13px] font-medium text-muted-foreground">By status</h2>
+      <div className="mb-6 rounded-[13px] border border-border bg-surface p-3.5">
+        <Bars items={byStatus} />
+      </div>
+
+      <h2 className="mb-2.5 text-[13px] font-medium text-muted-foreground">By location</h2>
+      <div className="mb-6 rounded-[13px] border border-border bg-surface p-3.5">
+        <Bars items={byLocation} />
+      </div>
+
+      <h2 className="mb-2.5 text-[13px] font-medium text-muted-foreground">By owner</h2>
+      <div className="mb-6 rounded-[13px] border border-border bg-surface p-3.5">
+        <Bars items={byOwner} />
+      </div>
+
       <h2 className="mb-2.5 text-[13px] font-medium text-muted-foreground">Download</h2>
       <button
         onClick={() => exportFile("xlsx")}
@@ -508,6 +725,78 @@ function ExportTab({ assets, onToast }: { assets: Asset[]; onToast: (m: string) 
       >
         <Download className="h-4 w-4" /> Export CSV
       </button>
+      <button
+        onClick={() => window.print()}
+        className="mt-2.5 flex w-full items-center justify-center gap-2 rounded-[11px] border border-border bg-surface px-4 py-3 text-[14.5px] font-medium"
+      >
+        <Printer className="h-4 w-4" /> Print report (PDF)
+      </button>
+
+      {isAdmin && (
+        <>
+          <h2 className="mb-2.5 mt-7 text-[13px] font-medium text-muted-foreground">
+            Bulk import (admin)
+          </h2>
+          <div className="rounded-[13px] border border-border bg-surface p-3.5">
+            <p className="mb-3 text-[13px] text-muted-foreground">
+              Upload a CSV or XLSX with columns: Tag, Name, Status, Location, Owner, Notes.
+            </p>
+            <div className="flex gap-2.5">
+              <button
+                onClick={() => fileRef.current?.click()}
+                disabled={importing}
+                className="flex flex-1 items-center justify-center gap-2 rounded-[11px] border border-border bg-background px-4 py-3 text-[14px] font-medium disabled:opacity-60"
+              >
+                <Upload className="h-4 w-4" /> {importing ? "Importing…" : "Choose file"}
+              </button>
+              <button
+                onClick={downloadTemplate}
+                className="flex items-center justify-center rounded-[11px] border border-border bg-background px-4 py-3 text-[14px] text-muted-foreground"
+              >
+                Template
+              </button>
+            </div>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".csv,.xlsx,.xls"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleImport(f);
+                e.target.value = "";
+              }}
+            />
+          </div>
+        </>
+      )}
+
+      {/* Print-only report sheet */}
+      <div className="print-report">
+        <h1>Asset Ledger Report</h1>
+        <p>Total assets: {assets.length}</p>
+        <h2>By status</h2>
+        {byStatus.map((s) => (
+          <div key={s.label} className="rp-row">
+            <span>{s.label}</span>
+            <span>{s.n}</span>
+          </div>
+        ))}
+        <h2>By location</h2>
+        {byLocation.map((s) => (
+          <div key={s.label} className="rp-row">
+            <span>{s.label}</span>
+            <span>{s.n}</span>
+          </div>
+        ))}
+        <h2>By owner</h2>
+        {byOwner.map((s) => (
+          <div key={s.label} className="rp-row">
+            <span>{s.label}</span>
+            <span>{s.n}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -518,17 +807,71 @@ function AssetSheet({
   onClose,
   onSave,
   onDelete,
+  onReload,
+  onToast,
 }: {
   asset: Asset;
   existing: boolean;
   onClose: () => void;
   onSave: (a: Asset) => void;
   onDelete: (a: Asset) => void;
+  onReload: () => Promise<void>;
+  onToast: (m: string) => void;
 }) {
   const [draft, setDraft] = useState<Asset>(asset);
+  const [checkouts, setCheckouts] = useState<Checkout[]>([]);
+  const [coName, setCoName] = useState("");
   useEffect(() => setDraft(asset), [asset]);
 
+  const loadCheckouts = useCallback(async () => {
+    if (!asset.id) return setCheckouts([]);
+    const { data } = await supabase
+      .from("checkouts")
+      .select("*")
+      .eq("asset_id", asset.id)
+      .order("checked_out_at", { ascending: false });
+    setCheckouts((data ?? []) as Checkout[]);
+  }, [asset.id]);
+
+  useEffect(() => {
+    loadCheckouts();
+  }, [loadCheckouts]);
+
   const set = (k: keyof Asset, v: string) => setDraft((d) => ({ ...d, [k]: v }));
+
+  const current = checkouts.find((c) => !c.returned_at);
+
+  const doCheckout = async () => {
+    if (!asset.id || !coName.trim()) return;
+    const { data: u } = await supabase.auth.getUser();
+    if (!u.user) return;
+    const { error } = await supabase.from("checkouts").insert({
+      asset_id: asset.id,
+      user_id: u.user.id,
+      checked_out_to: coName.trim(),
+    });
+    if (error) return onToast("Could not check out");
+    await supabase.from("assets").update({ owner: coName.trim() }).eq("id", asset.id);
+    setDraft((d) => ({ ...d, owner: coName.trim() }));
+    setCoName("");
+    await loadCheckouts();
+    await onReload();
+    onToast("Checked out");
+  };
+
+  const doReturn = async () => {
+    if (!current) return;
+    const { error } = await supabase
+      .from("checkouts")
+      .update({ returned_at: new Date().toISOString() })
+      .eq("id", current.id);
+    if (error) return onToast("Could not return");
+    await supabase.from("assets").update({ owner: "" }).eq("id", asset.id!);
+    setDraft((d) => ({ ...d, owner: "" }));
+    await loadCheckouts();
+    await onReload();
+    onToast("Returned");
+  };
 
   return (
     <>
@@ -599,6 +942,66 @@ function AssetSheet({
             className="min-h-[60px] w-full resize-none rounded-[10px] border border-border bg-surface px-3.5 py-2.5 text-[14.5px] outline-none focus:border-accent"
           />
         </div>
+
+        {existing && (
+          <div className="mb-4 rounded-[12px] border border-border bg-surface p-3.5">
+            <div className="mb-2.5 flex items-center gap-2 text-[13px] font-medium text-muted-foreground">
+              <ClipboardCheck className="h-4 w-4" /> Checkout
+            </div>
+            {current ? (
+              <div>
+                <p className="mb-2.5 text-[13.5px]">
+                  Checked out to{" "}
+                  <span className="font-semibold">{current.checked_out_to || "—"}</span>
+                </p>
+                <p className="mb-3 text-[12px] text-muted-foreground">
+                  Since {new Date(current.checked_out_at).toLocaleString()}
+                </p>
+                <button
+                  onClick={doReturn}
+                  className="w-full rounded-[11px] border border-border bg-background px-4 py-2.5 text-[14px] font-medium"
+                >
+                  Mark returned
+                </button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <input
+                  value={coName}
+                  onChange={(e) => setCoName(e.target.value)}
+                  placeholder="Check out to (name)"
+                  className="w-full rounded-[10px] border border-border bg-background px-3 py-2.5 text-[14px] outline-none focus:border-accent"
+                />
+                <button
+                  onClick={doCheckout}
+                  className="rounded-[10px] border border-accent bg-accent px-4 text-[14px] font-semibold text-accent-foreground"
+                >
+                  Out
+                </button>
+              </div>
+            )}
+
+            {checkouts.length > 0 && (
+              <div className="mt-3.5 border-t border-border pt-3">
+                <div className="mb-2 flex items-center gap-1.5 text-[12.5px] text-muted-foreground">
+                  <History className="h-3.5 w-3.5" /> History
+                </div>
+                <div className="space-y-2">
+                  {checkouts.slice(0, 6).map((c) => (
+                    <div key={c.id} className="flex items-center justify-between text-[12.5px]">
+                      <span>{c.checked_out_to || "—"}</span>
+                      <span className="text-muted-foreground">
+                        {c.returned_at
+                          ? `Returned ${new Date(c.returned_at).toLocaleDateString()}`
+                          : "Active"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         <button
           onClick={() => onSave(draft)}
