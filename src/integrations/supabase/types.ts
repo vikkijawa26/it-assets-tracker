@@ -53,6 +53,44 @@ export type Database = {
         }
         Relationships: []
       }
+      checkouts: {
+        Row: {
+          asset_id: string
+          checked_out_at: string
+          checked_out_to: string
+          id: string
+          notes: string
+          returned_at: string | null
+          user_id: string
+        }
+        Insert: {
+          asset_id: string
+          checked_out_at?: string
+          checked_out_to?: string
+          id?: string
+          notes?: string
+          returned_at?: string | null
+          user_id: string
+        }
+        Update: {
+          asset_id?: string
+          checked_out_at?: string
+          checked_out_to?: string
+          id?: string
+          notes?: string
+          returned_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "checkouts_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "assets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           created_at: string
