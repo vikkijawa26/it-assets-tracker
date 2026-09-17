@@ -104,24 +104,37 @@
   transition: width 0.3s ease;
 }
 
-/* Print: labels sheet */
+/* Report sheet is hidden on screen, shown only when printing */
+.print-report {
+  display: none;
+}
+
 @media print {
   body * {
     visibility: hidden !important;
   }
   .print-area,
-  .print-area * {
+  .print-area *,
+  .print-report,
+  .print-report * {
     visibility: visible !important;
   }
-  .print-area {
+  .print-area,
+  .print-report {
     position: absolute;
     inset: 0;
+    background: #fff;
+    color: #000;
+  }
+  .print-area {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 12px;
     padding: 16px;
-    background: #fff;
-    color: #000;
+  }
+  .print-report {
+    display: block;
+    padding: 24px;
   }
   .print-area .label-card {
     display: flex;
@@ -152,17 +165,6 @@
   .print-area .label-card canvas {
     width: 120px !important;
     height: 120px !important;
-  }
-}
-
-/* Print: report sheet */
-@media print {
-  .print-report {
-    position: absolute;
-    inset: 0;
-    background: #fff;
-    color: #000;
-    padding: 24px;
   }
   .print-report h1 {
     color: #000;
