@@ -642,6 +642,10 @@ function ReportsTab({
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   const handleImport = async (file: File) => {
+    if (!/\.(xlsx|xls)$/i.test(file.name)) {
+      onToast("Please choose an Excel file (.xlsx or .xls)");
+      return;
+    }
     setImporting(true);
     try {
       const XLSX = await import("xlsx");
