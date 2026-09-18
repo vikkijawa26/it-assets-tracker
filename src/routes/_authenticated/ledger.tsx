@@ -647,7 +647,10 @@ function ReportsTab({
       const XLSX = await import("xlsx");
       const data = await file.arrayBuffer();
       const wb = XLSX.read(data);
-      const ws = wb.Sheets[wb.SheetNames[0]];
+      const firstSheet = wb.SheetNames[0];
+      if (!firstSheet) throw new Error("Spreadsheet has no sheets");
+      const ws = wb.Sheets[firstSheet];
+      if (!ws) throw new Error("Spreadsheet sheet is empty");
       const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws);
       const { data: u } = await supabase.auth.getUser();
       if (!u.user) throw new Error("Not signed in");
