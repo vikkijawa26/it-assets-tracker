@@ -742,7 +742,7 @@ function ReportsTab({
           </h2>
           <div className="rounded-[13px] border border-border bg-surface p-3.5">
             <p className="mb-3 text-[13px] text-muted-foreground">
-              Upload a CSV or XLSX with columns: Tag, Name, Status, Location, Owner, Notes.
+              Upload an Excel file (.xlsx or .xls) with columns: Tag, Name, Status, Location, Owner, Notes.
             </p>
             <div className="flex gap-2.5">
               <button
@@ -762,7 +762,7 @@ function ReportsTab({
             <input
               ref={fileRef}
               type="file"
-              accept=".csv,.xlsx,.xls"
+              accept=".xlsx,.xls"
               className="hidden"
               onChange={(e) => {
                 const f = e.target.files?.[0];
